@@ -43,7 +43,7 @@ properties(SetObservable,Access=public)
     % Extrapolation properties
     extrapolate (1,1) logical = true;
     extrapolationAlpha (1,1) double ...
-        {mustBeInRange(extrapolationAlpha,0,1)} = 0.7;
+        {mustBeInRange(extrapolationAlpha,0,1)} = 0.65;
     
     plotType (1,:) char = 'surfc';
     
@@ -89,7 +89,7 @@ methods(Access=public)
             xData = linspace(-68,68,6);
             yData = linspace(-68,68,6);
             [xData, yData] = meshgrid(xData, yData);
-            zData = 0.1*xData.^2-yData+4*randn(size(xData))+100;
+            zData = 0.1*xData.^2-0.2*yData+0.1*randn(size(xData))+100;
             
             % Remove values outside of wafer radius
             zData(sqrt(xData.^2+yData.^2)>75) = nan;
@@ -210,6 +210,10 @@ methods(Access=public)
         % Draw surface plot
         obj.drawSurface;
         
+        % Draw grid
+        obj.drawGrid(obj.Axes, obj.waferSize/2, ...
+            'LineWidth', 0.8);
+        
         % Draw wafer line circle
         obj.drawCircle(obj.Axes, obj.waferSize/2, '-', ...
             'LineWidth', 1.5, 'Color', 'black');
@@ -252,10 +256,9 @@ methods(Access=public)
         
             case 'surfc'
                 
-                [~, h1] = contourf(obj.X, obj.Y, obj.ZI, 300, 'LineStyle', 'None');
+                [~, h1] = contourf(obj.X, obj.Y, obj.ZI, 200, 'LineStyle', 'None');
                 if ~all(isnan(obj.ZE), 'all')
-                    [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, ...
-                        'LineStyle', 'None');
+                    [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, 'LineStyle', 'None');
                 end
                 [C, h3] = contour(obj.X, obj.Y, obj.ZI, obj.contourLevels, 'Color', 'k');
                 if ~all(isnan(obj.ZE), 'all')
@@ -313,6 +316,7 @@ methods(Static=true, Access=public)
         y = radius*sin(phi);
         
         lineHandle = plot(axes, x, y, varargin{:});
+        lineHandle.HandleVisibility = 'off';
         
         if nargout == 0
             clear lineHandle
@@ -325,6 +329,7 @@ methods(Static=true, Access=public)
     
         DT = delaunay(x, y);
         lineHandle = triplot(DT, x, y, 'Parent', axes, varargin{:});
+        lineHandle.HandleVisibility = 'off';
 
     end
 
@@ -334,6 +339,7 @@ methods(Static=true, Access=public)
         DT = delaunayTriangulation(x, y);
         CH = convexHull(DT);
         lineHandle = plot(axes, DT.Points(CH,1), DT.Points(CH,2), varargin{:});
+        lineHandle.HandleVisibility = 'off';
         
     end
     
@@ -344,49 +350,86 @@ methods(Static=true, Access=public)
         
     end
     
-    function [value, remainingargs] = getPositional(args, name, default)
-    %GETPOSITIONAL extracts optional argument out of a cell array.
+    function lineHandle = drawGrid(axes, radius, varargin)
+    %DRAWGRID draws a major radial grid to the figure.
     
-        if nargin < 3
-            default = nan;
-        end
-    
-        remainingargs = {};
-        skipping = false;
-        value = default;
+        xticks = axes.XTick(-radius < axes.XTick & axes.XTick < radius);
+        yticks = axes.YTick(-radius < axes.YTick & axes.YTick < radius);
         
-        if iscell(args)
-            % Extract cell value from array, if exists.
-            for i = 1:length(args)
-                if strcmpi(args{i}, name)
-                    value = args{i+1};
-                    skipping = true;
-                elseif skipping
-                    skipping = false;
-                else
-                    remainingargs{end+1} = args{i};
-                end
-            end
-            
-        elseif isstruct(args)
-            % Extract fields and find field name.
-            fields = fieldnames(args);
-            idx = find(contains(lower(fields), lower(name)));
-            
-            if ~isempty(idx)
-                value = args.(fields{idx});
-            end
-            
-            % Don't change structure
-            remainingargs = args;
-            
+        if ~all(xticks==yticks)
+            error('X- and Y-Ticks not equivalent. Aborting grid creation.');
+        end
+        
+        % Draw circles
+        phi = linspace(0,2*pi,2*365);
+        phi(end+1) = phi(1);
+        
+        [color, varargin] = getPositional(varargin, 'Color', 0.75*[1,1,1]);
+        
+        for i = 1:numel(xticks)
+            x = xticks(i)*cos(phi);
+            y = xticks(i)*sin(phi);
+            lineHandle = plot(axes, x, y, 'Color', color, varargin{:});
+            lineHandle.HandleVisibility = 'off';
+        end
+        
+        % Draw lines
+        phi = 0:(30*pi/180):pi;
+        phi(end) = [];
+        
+        t = linspace(-radius,radius);
+        
+        for i = 1:numel(phi)
+            x = t*cos(phi(i));
+            y = t*sin(phi(i));
+            lineHandle = plot(axes, x, y, 'Color', color, varargin{:});
+            lineHandle.HandleVisibility = 'off';
         end
         
     end
     
 end
-
-
-
 end
 
+%% Additional Functions
+function [value, remainingargs] = getPositional(args, name, default)
+%GETPOSITIONAL extracts optional argument out of a cell array.
+
+    if nargin < 3
+        default = nan;
+    end
+
+    remainingargs = {};
+    skipping = false;
+    value = default;
+
+    if iscell(args)
+        
+        % Extract cell value from array, if exists.
+        for i = 1:length(args)
+            if strcmpi(args{i}, name)
+                value = args{i+1};
+                skipping = true;
+            elseif skipping
+                skipping = false;
+            else
+                remainingargs{end+1} = args{i};
+            end
+        end
+
+    elseif isstruct(args)
+        
+        % Extract fields and find field name.
+        fields = fieldnames(args);
+        idx = find(contains(lower(fields), lower(name)));
+
+        if ~isempty(idx)
+            value = args.(fields{idx});
+        end
+
+        % Don't change structure
+        remainingargs = args;
+
+    end
+
+end

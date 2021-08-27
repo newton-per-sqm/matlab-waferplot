@@ -4,11 +4,11 @@
 load Example
 
 A = WaferPlot(xData,yData,zData);
-A.contourLevels = [-100,40,100,200,300];
+A.contourLevels = [-100,-50,0,50,100,200,300,400];
 A.interpMethod = 'rbf';
+A.interpType = 'cubic';
 A.interpolateGrid;
 A.createFigure;
-
 
 
 %% Section 1 Title

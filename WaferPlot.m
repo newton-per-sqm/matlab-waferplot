@@ -9,11 +9,11 @@ classdef WaferPlot < handle & ...
 %   (c) Pascal Muster, Germany, 2021
 
 %% Properties
-properties(Constant)
+properties (Constant)
     Version string = '0.1a';
 end
 
-properties(Access=public)
+properties (Access=public)
     
     % Plot Objects
     Figure matlab.ui.Figure
@@ -25,12 +25,12 @@ properties(Access=public)
     
 end
 
-properties(SetObservable,Access=public)
+properties (SetObservable, Access=public)
     
     % Plot properties
     figSize (1,2) double {mustBePositive} = [16,15];
     fontSize (1,1) double {mustBePositive} = 12;
-    waferSize (1,1) double {mustBePositive} = 150;
+    waferSize (1,1) double = 150;
     waferUnit (1,:) char = 'mm'; 
     
     % Interpolation properties
@@ -39,6 +39,7 @@ properties(SetObservable,Access=public)
     interpType (1,:) char  = 'linear';
     interpResolution (1,1) int16 ...
         {mustBeInRange(interpResolution,100,1000)} = 300;
+    interpBounds (1,2) double = [-inf,inf];
     
     % Extrapolation properties
     extrapolate (1,1) logical = true;
@@ -56,7 +57,11 @@ properties(SetObservable,Access=public)
     
 end
 
-properties(Access=protected)
+properties (Dependent)
+  waferRadius double
+end
+
+properties (Access=protected)
     DT % Delaunay Triangles
     CH % Convex Hull
     
@@ -116,13 +121,41 @@ methods(Access=public)
     
 end
 
+methods
+% GET & SET Methods
+    
+    function set.waferSize(obj,val)
+    % WAFERSIZE: Adjust Size if value less equal 0.
+        if val > 0
+            obj.waferSize = val;
+        else
+            obj.waferSize = max(sqrt(obj.xData.^2+obj.yData.^2));
+        end
+    end
+    
+    function set.waferRadius(obj,val)
+    % WAFERSIZE: Adjust Size if value less equal 0.
+        if val > 0
+            obj.waferSize = 2*val;
+        else
+            obj.waferSize = max(sqrt(obj.xData.^2+obj.yData.^2));
+        end
+    end
+    
+    function val = get.waferRadius(obj)
+    % WAFERSIZE: Adjust Size if value less equal 0.
+        val = obj.waferSize/2;
+    end
+    
+end
+
 methods(Access=public)
     
     function obj = interpolateGrid(obj)
     %INTERPOLATEGRID generates interpolation by griddata or rbf.
         
         [X, Y] = ndgrid(... % Create ndgrid in x and y about the full wafer size!
-            linspace(-obj.waferSize/2, +obj.waferSize/2, obj.interpResolution)); 
+            linspace(-obj.waferRadius, +obj.waferRadius, obj.interpResolution)); 
         
         switch lower(obj.interpMethod)
             
@@ -150,8 +183,6 @@ methods(Access=public)
                 ZI = reshape(ZI, size(X));
                 ZE = reshape(ZE, size(X));
                 ZA = reshape(ZA, size(X));
-                ZE(sqrt(X.^2+Y.^2) > obj.waferSize/2) = nan;
-                ZA(sqrt(X.^2+Y.^2) > obj.waferSize/2) = nan;
                 
             otherwise
                 error('Unknown interpolation method "%s".', obj.interpMethod);
@@ -162,15 +193,25 @@ methods(Access=public)
         end
         
         % Save X and Y ndgrids
-        obj.X = X;
-        obj.Y = Y;
+        obj.X = X; obj.Y = Y;
         
-        % Save interpolated (ZI) and extrapolated (ZE) values
-        obj.ZI = ZI;
-        obj.ZE = ZE;
-        obj.ZA = ZA;
+        % Bound Z-Values by interpolation bounds
+        ZI(ZI < obj.interpBounds(1)) = obj.interpBounds(1);
+        ZI(ZI > obj.interpBounds(2)) = obj.interpBounds(2);
+        ZE(ZE < obj.interpBounds(1)) = obj.interpBounds(1);
+        ZE(ZE > obj.interpBounds(2)) = obj.interpBounds(2);
+        ZA(ZA < obj.interpBounds(1)) = obj.interpBounds(1);
+        ZA(ZA > obj.interpBounds(2)) = obj.interpBounds(2);
+        
+        % Bound Z-Values by wafer radius
+        ZI(sqrt(X.^2+Y.^2) > obj.waferRadius) = nan;
+        ZE(sqrt(X.^2+Y.^2) > obj.waferRadius) = nan;
+        ZA(sqrt(X.^2+Y.^2) > obj.waferRadius) = nan;
+        
+        obj.ZI = ZI; obj.ZE = ZE; obj.ZA = ZA;
         
     end
+
 end
 
 methods(Access=public)
@@ -194,14 +235,16 @@ methods(Access=public)
         obj.Axes = nexttile(obj.Tile);
         obj.Axes.FontSize = obj.fontSize;
         
-        axtoolbar(obj.Axes, {'export','datacursor','brush'});
+        axtoolbar(obj.Axes, {'export','datacursor','brush','restoreview'});
         
         obj.Axes.DataAspectRatio = [1,1,1];
         obj.Axes.XLabel.String = ['x [', obj.waferUnit, ']'];
         obj.Axes.YLabel.String = ['y [', obj.waferUnit, ']'];
         
-        obj.Axes.XLim = round([-obj.waferSize/2, +obj.waferSize/2],-1);
-        obj.Axes.YLim = round([-obj.waferSize/2, +obj.waferSize/2],-1);
+        limit = [floor(-obj.waferRadius/10)*10, ceil(obj.waferRadius/10)*10];
+        
+        obj.Axes.XLim = limit;
+        obj.Axes.YLim = limit;
         
         % No outline box
         obj.Axes.Box = 'off';
@@ -210,12 +253,8 @@ methods(Access=public)
         % Draw surface plot
         obj.drawSurface;
         
-        % Draw grid
-        obj.drawGrid(obj.Axes, obj.waferSize/2, ...
-            'LineWidth', 0.8);
-        
         % Draw wafer line circle
-        obj.drawCircle(obj.Axes, obj.waferSize/2, '-', ...
+        obj.drawCircle(obj.Axes, obj.waferRadius, '-', ...
             'LineWidth', 1.5, 'Color', 'black');
         
         obj.drawConvexHull(obj.Axes, obj.xData, obj.yData, '-', ...
@@ -225,12 +264,11 @@ methods(Access=public)
         obj.drawPoints(obj.Axes, obj.xData, obj.yData, 'ko');
         
         % Create despined axes
-        offsetAxes(obj.Axes)
+        despline(obj.Axes,1)
         
         obj.Axes.LineWidth = 1;
         obj.Axes.TickDir = 'out';
-        obj.Axes.XColor = 'black';
-        obj.Axes.YColor = 'black';
+        obj.Axes.YTick = obj.Axes.XTick;
         
     end
     
@@ -241,44 +279,66 @@ methods(Access=public)
             
             case 'contourf'
                 
+                % Filled surfaces
                 [~, h1] = contourf(obj.X, obj.Y, obj.ZI, obj.contourLevels, 'LineStyle', 'None');
-                [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, 'LineStyle', 'None');
+                if ~all(isnan(obj.ZE), 'all')
+                    [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, 'LineStyle', 'None');
+                end
+                
+                % Radial grid
+                obj.drawGrid(obj.Axes, obj.waferRadius);
+                
+                % Contour lines
                 [C, h3] = contour(obj.X, obj.Y, obj.ZI, h1.LevelList, 'Color', 'k');
-                [~, h4] = contour(obj.X, obj.Y, obj.ZE, h1.LevelList, 'Color', 'k');
-        
-                % make extrapolation transparent
-                drawnow; % update graphical objects
-                h2Fills = h2.FacePrims;  % array of TriangleStrip objects
-                [h2Fills.ColorType] = deal('truecoloralpha');  % default = 'truecolor'
-                for i = 1 : numel(h2Fills)
-                    h2Fills(i).ColorData(4) = 255*obj.extrapolationAlpha;   % default=255
+                if ~all(isnan(obj.ZE), 'all')
+                    [~, h4] = contour(obj.X, obj.Y, obj.ZE, h1.LevelList, 'Color', 'k');
+                end
+                
+                % Overwrite colors by Alpha
+                if ~all(isnan(obj.ZE), 'all')
+                    % Make extrapolation transparent
+                    drawnow; % update graphical objects
+                    h2Fills = h2.FacePrims;  % Array of TriangleStrip objects
+                    [h2Fills.ColorType] = deal('truecoloralpha');
+                    for i = 1 : numel(h2Fills)
+                        h2Fills(i).ColorData(4) = 255*obj.extrapolationAlpha;
+                    end
                 end
         
             case 'surfc'
                 
-                [~, h1] = contourf(obj.X, obj.Y, obj.ZI, 200, 'LineStyle', 'None');
+                % Filled surfaces
+                [~, h1] = contourf(obj.X, obj.Y, obj.ZI, obj.interpResolution/2, ...
+                    'LineStyle', 'None');
                 if ~all(isnan(obj.ZE), 'all')
-                    [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, 'LineStyle', 'None');
+                    [~, h2] = contourf(obj.X, obj.Y, obj.ZE, h1.LevelList, ...
+                        'LineStyle', 'None');
                 end
+                
+                % Radial grid
+                obj.drawGrid(obj.Axes, obj.waferRadius);
+                
+                % Contour lines
                 [C, h3] = contour(obj.X, obj.Y, obj.ZI, obj.contourLevels, 'Color', 'k');
                 if ~all(isnan(obj.ZE), 'all')
                     contour(obj.X, obj.Y, obj.ZE, h3.LevelList, 'Color', 'black');
                 end
                 
+                % Overwrite colors by Alpha
                 if ~all(isnan(obj.ZE), 'all')
-                    % make extrapolation transparent
+                    % Make extrapolation transparent
                     drawnow; % update graphical objects
-                    h2Fills = h2.FacePrims;  % array of TriangleStrip objects
-                    [h2Fills.ColorType] = deal('truecoloralpha');  % default = 'truecolor'
+                    h2Fills = h2.FacePrims;  % Array of TriangleStrip objects
+                    [h2Fills.ColorType] = deal('truecoloralpha');
                     for i = 1 : numel(h2Fills)
-                        h2Fills(i).ColorData(4) = 255*obj.extrapolationAlpha;   % default=255
+                        h2Fills(i).ColorData(4) = 255*obj.extrapolationAlpha;
                     end
                 end
                 
             otherwise
                 error('Unknown plot type %s', obj.plotType);
         end
-                
+        
         % contour labels
         clabel(C,h3)
         
@@ -354,11 +414,6 @@ methods(Static=true, Access=public)
     %DRAWGRID draws a major radial grid to the figure.
     
         xticks = axes.XTick(-radius < axes.XTick & axes.XTick < radius);
-        yticks = axes.YTick(-radius < axes.YTick & axes.YTick < radius);
-        
-        if ~all(xticks==yticks)
-            error('X- and Y-Ticks not equivalent. Aborting grid creation.');
-        end
         
         % Draw circles
         phi = linspace(0,2*pi,2*365);
